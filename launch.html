@@ -26,14 +26,15 @@
       box-shadow:0 12px 32px rgba(0,0,0,.25);
     }
 
-    /* ★重要：canvas上は縦スクロール許可（ノブ操作時だけJSで固定する） */
+    /* ★ canvas上で縦スクロールは許可（pan-y） */
     canvas{
       width:100%;
       height:520px;
       background: rgba(255,255,255,.02);
       border-radius:14px;
       border:1px solid rgba(255,255,255,.10);
-      touch-action: pan-y; /* ←縦スクロールはOK */
+      touch-action: pan-y;
+      display:block;
     }
 
     label{ display:block; font-size:12px; color:var(--muted); margin-top:10px; margin-bottom:4px;}
@@ -57,7 +58,7 @@
     /* スマホ対応：縦並びにする */
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
-      canvas { height: 70vh; min-height: 360px; }
+      canvas { height: 72vh; min-height: 420px; } /* ちょい広め */
       .card:last-child { order: 2; }
       .card:first-child { order: 1; }
     }
@@ -65,13 +66,13 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🚀 バネで天体まで飛ばそう（デモ物理）</h1>
+  <h1>🚀 バネを天体まで飛ばそう（デモ物理）</h1>
   <div class="grid">
     <div class="card">
       <canvas id="c"></canvas>
       <div class="hint">
         操作：発射台のノブをドラッグして押し込む → 離すと発射。<br>
-        角度は「ちょっとだけ」変わる（暴走しにくい優しめ設定）。
+        ノブを掴んでいる間だけスクロール固定（それ以外はスクロールOK）。
       </div>
     </div>
 
@@ -116,7 +117,7 @@
 
       <div class="small" style="margin-top:12px;">
         ・式は教育用の「それっぽさ」です（精密設計ではない）。<br>
-        ・硬くしすぎると当たり前に飛ぶので、目標を上げて遊べます。
+        ・天体はランダム位置に出ます（天体ごとにサイズは固定）。
       </div>
     </div>
   </div>
@@ -143,54 +144,64 @@
   const goalNameEl = document.getElementById("goalName");
   const toggleAssistBtn = document.getElementById("toggleAssist");
 
-  // -------------------------
-  // DPR / canvas resize
-  // -------------------------
+  let assist = true;
   let dpr = 1;
+
   function resize(){
     const r = canvas.getBoundingClientRect();
     dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
-    canvas.width  = Math.floor(r.width  * dpr);
+    canvas.width = Math.floor(r.width * dpr);
     canvas.height = Math.floor(r.height * dpr);
-    // 以後の描画はCSSピクセルでやる
+    // 以後の描画は「CSSピクセル座標」で描ける
     ctx.setTransform(dpr,0,0,dpr,0,0);
+
+    // 画面サイズが変わったら、発射台は「必ず下中央」に再配置
+    initPositions();
+
+    // 目標が画面外に出ないよう、今の天体ももう一度安全位置へ
+    placeGoalRandom();
   }
   window.addEventListener("resize", resize);
 
   const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-  const lerp = (a,b,t)=>a+(b-a)*t;
+  const lerp  = (a,b,t)=>a+(b-a)*t;
 
   // -------------------------
-  // Images（1回だけロード）
+  // Images
   // -------------------------
   const mascotImg = new Image();
   mascotImg.src = "astronaut.png";
   let mascotReady = false;
   mascotImg.onload = () => { mascotReady = true; };
 
-  // ボール用ロゴ（logo.png）
+  // ★ボール用ロゴ
   const ballImg = new Image();
   ballImg.src = "logo.png";
   let ballImgReady = false;
   ballImg.onload = () => { ballImgReady = true; };
 
-  const bgImages = {
-    star: new Image(),
-    rocket: new Image(),
-    satellite: new Image(),
-    ufo: new Image(),
+  // ★天体6枚（ファイル名はここ）
+  const planetImgs = {
+    moon:   new Image(),
+    mars:   new Image(),
+    jupiter:new Image(),
+    saturn: new Image(),
+    uranus: new Image(),
+    neptune:new Image(),
   };
-  bgImages.star.src = "shooting_star.png";
-  bgImages.rocket.src = "rocket.png";
-  bgImages.satellite.src = "satellite.png";
-  bgImages.ufo.src = "ufo.png";
+  planetImgs.moon.src    = "moon.png";
+  planetImgs.mars.src    = "mars.png";
+  planetImgs.jupiter.src = "jupiter.png";
+  planetImgs.saturn.src  = "saturn.png";
+  planetImgs.uranus.src  = "uranus.png";
+  planetImgs.neptune.src = "neptune.png";
 
   // -------------------------
-  // World / physics
+  // Toy physics world
   // -------------------------
   const world = { g: 520, drag: 0.985, dt: 1/60 };
 
-  const ball = { x:0, y:0, vx:0, vy:0, r:16, active:false };
+  const ball = { x:0, y:0, vx:0, vy:0, r:18, active:false }; // ロゴ球ちょい大きめ
 
   const launcher = {
     baseX: 0, baseY: 0,
@@ -203,19 +214,35 @@
     dragging: false,
   };
 
+  // 飛来物（背景）
+  const bgImages = {
+    star: new Image(),
+    rocket: new Image(),
+    satellite: new Image(),
+    ufo: new Image(),
+  };
+  bgImages.star.src = "shooting_star.png";
+  bgImages.rocket.src = "rocket.png";
+  bgImages.satellite.src = "satellite.png";
+  bgImages.ufo.src = "ufo.png";
   const bgObjects = [];
 
+  // -------------------------
+  // Goals (planets)
+  // ★天体ごとにサイズ（当たり判定半径）を変える
+  // -------------------------
   const goals = [
-    {name:"月",   yFrac: 0.68, r: 24},
-    {name:"火星", yFrac: 0.52, r: 26},
-    {name:"木星", yFrac: 0.34, r: 30},
-    {name:"土星", yFrac: 0.22, r: 32},
-    {name:"天王星", yFrac: 0.16, r: 34},
-    {name:"海王星", yFrac: 0.12, r: 36},
+    { key:"moon",    name:"月",     r: 26 },
+    { key:"mars",    name:"火星",   r: 28 },
+    { key:"jupiter", name:"木星",   r: 36 },
+    { key:"saturn",  name:"土星",   r: 40 },
+    { key:"uranus",  name:"天王星", r: 34 },
+    { key:"neptune", name:"海王星", r: 34 },
   ];
   let goalIndex = 0;
 
-  let assist = true;
+  // 現在の「目標天体」の実体（ランダム位置）
+  const goalState = { x: 0, y: 0, r: 30, name: "—", key: "moon" };
 
   function getK(){
     const d = Number(dEl.value);
@@ -225,17 +252,19 @@
     return (G * Math.pow(d,4)) / (8 * n * Math.pow(D,3));
   }
 
-  function currentX(){ return Math.round(clamp(launcher.restLen - launcher.len, 0, 999)); }
+  function currentX(){
+    return Math.round(clamp(launcher.restLen - launcher.len, 0, 999));
+  }
 
   function initPositions(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
 
-    // ★発射台は「画面下中央」固定
+    // ★発射台は常に「画面下・中央」
     launcher.baseX = w * 0.5;
     launcher.baseY = h - 40;
 
-    launcher.len = launcher.restLen;
+    launcher.len   = launcher.restLen;
     launcher.axisX = 0;
     launcher.axisY = -1;
 
@@ -245,20 +274,61 @@
     ball.active = false;
   }
 
-  function goalPos(){
+  // ★目標を「ランダム位置」に置く（ただし近すぎ/端すぎ禁止）
+  function placeGoalRandom(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
+
+    const margin = 26;             // 画面端からの余白
+    const safeBottom = 130;        // 地面/発射台の近くを避ける
     const g = goals[goalIndex];
-    return { x: w*0.75, y: h*g.yFrac, r: g.r, name:g.name };
+    const r = g.r;
+
+    // 置ける範囲（上は少し余裕、下は発射台付近を避ける）
+    const minX = margin + r;
+    const maxX = w - (margin + r);
+    const minY = margin + r;
+    const maxY = Math.max(minY + 10, (h - safeBottom) - r);
+
+    // 発射台から近すぎないようにする
+    const lx = launcher.baseX;
+    const ly = launcher.baseY - launcher.restLen; // だいたいバネ上端付近
+    const minDist = 220; // 近すぎると即クリアになりがちなので
+
+    let x= w*0.75, y= h*0.45;
+    for(let t=0; t<40; t++){
+      const rx = minX + Math.random() * (maxX - minX);
+      const ry = minY + Math.random() * (maxY - minY);
+      const d  = Math.hypot(rx - lx, ry - ly);
+      if(d >= minDist){
+        x = rx; y = ry;
+        break;
+      }
+      // 40回やって無理なら最後の値で妥協（画面が極端に小さい場合）
+      x = rx; y = ry;
+    }
+
+    goalState.x = x;
+    goalState.y = y;
+    goalState.r = r;
+    goalState.name = g.name;
+    goalState.key = g.key;
+
+    goalNameEl.textContent = g.name;
   }
 
   function setGoal(i){
-    goalIndex = (i+goals.length)%goals.length;
-    goalNameEl.textContent = goals[goalIndex].name;
+    goalIndex = (i + goals.length) % goals.length;
+    placeGoalRandom();
   }
 
-  nextGoalBtn.addEventListener("click", ()=> setGoal(goalIndex+1));
-  resetBtn.addEventListener("click", ()=>{ initPositions(); statusEl.textContent="リセットしました"; });
+  nextGoalBtn.addEventListener("click", ()=> setGoal(goalIndex + 1));
+
+  resetBtn.addEventListener("click", ()=>{
+    initPositions();
+    placeGoalRandom();
+    statusEl.textContent = "リセットしました";
+  });
 
   toggleAssistBtn.addEventListener("click", ()=>{
     assist = !assist;
@@ -274,22 +344,22 @@
 
   function knobPos(){
     return {
-      x: launcher.baseX + launcher.axisX*launcher.len,
-      y: launcher.baseY + launcher.axisY*launcher.len
+      x: launcher.baseX + launcher.axisX * launcher.len,
+      y: launcher.baseY + launcher.axisY * launcher.len
     };
   }
 
   function hitKnob(p){
     const k = knobPos();
-    const dx=p.x-k.x, dy=p.y-k.y;
-    return (dx*dx+dy*dy) <= (launcher.knobR+10)*(launcher.knobR+10);
+    const dx = p.x - k.x, dy = p.y - k.y;
+    return (dx*dx + dy*dy) <= (launcher.knobR + 10) * (launcher.knobR + 10);
   }
 
   function setFromPointer(p){
     let dx = p.x - launcher.baseX;
     let dy = p.y - launcher.baseY;
 
-    dy = Math.min(dy, -30);
+    dy = Math.min(dy, -30); // 基本は上方向
 
     let len = Math.hypot(dx,dy);
     if(len < 1) len = 1;
@@ -300,7 +370,7 @@
     const maxDeg = assist ? 18 : 25;
     const max = maxDeg * Math.PI/180;
 
-    let angle = Math.atan2(ax, -ay);
+    let angle = Math.atan2(ax, -ay); // 0=真上
     angle = clamp(angle, -max, max);
 
     launcher.axisX = Math.sin(angle);
@@ -311,76 +381,61 @@
   }
 
   // -------------------------
-  // Spawn functions（4種類）
+  // 飛来物（4種） ※前のまま（おまけ）
   // -------------------------
   function spawnShootingStar(){
     const w = canvas.getBoundingClientRect().width;
-    const angle = (225 + (-15 + Math.random()*30)) * Math.PI/180; // 右上→左下 ±15°
-    const speed = (380 + Math.random()*260) * 0.5;               // 速度 半分
+    const angle = (225 + (-15 + Math.random()*30)) * Math.PI/180;
+    const speed = (380 + Math.random()*260) * 0.5;
     const life = 6.0;
-
     bgObjects.push({
-      type: "star",
+      type:"star",
       x: w * (0.65 + Math.random()*0.35),
       y: -20,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life,
-      maxLife: life,
-      size: 44*3, // サイズ3倍
-      alpha: 1
+      vx: Math.cos(angle)*speed,
+      vy: Math.sin(angle)*speed,
+      life, maxLife: life,
+      size: 44*3, alpha: 1
     });
   }
-
   function spawnRocket(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
     const life = 7.0;
     bgObjects.push({
-      type: "rocket",
+      type:"rocket",
       x: Math.random()*w,
       y: h + 10,
       vx: (-80 + Math.random()*160) * 0.5,
       vy: (-420 - Math.random()*260) * 0.5,
-      life,
-      alpha: 1,
-      size: 44*3
+      life, alpha: 1, size: 44*3
     });
   }
-
   function spawnSatellite(){
     const h = canvas.getBoundingClientRect().height;
     const life = 8.0;
     bgObjects.push({
-      type: "satellite",
+      type:"satellite",
       x: -30,
       y: Math.random()*h*0.55,
       vx: (260 + Math.random()*220) * 0.5,
       vy: (60 + Math.random()*90) * 0.5,
-      life,
-      alpha: 1,
-      size: 44*3
+      life, alpha: 1, size: 44*3
     });
   }
-
   function spawnUFO(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
     const life = 6 + Math.random()*6;
     bgObjects.push({
-      type: "ufo",
+      type:"ufo",
       x: Math.random()*w,
       y: Math.random()*h*0.55,
       vx: (-240 + Math.random()*480) * 0.5,
       vy: (-180 + Math.random()*360) * 0.5,
-      life,
-      alpha: 1,
-      fade: true,
-      size: 62*3
+      life, alpha: 1, fade: true, size: 62*3
     });
   }
-
-  // 5秒に1回くらい（複数同時もあり）
   setInterval(() => {
     const count = Math.random() < 0.35 ? 2 : 1;
     for(let i=0;i<count;i++){
@@ -392,20 +447,23 @@
     }
   }, 5000);
 
+  // -------------------------
+  // Launch
+  // -------------------------
   function launch(){
     const x = currentX();
     if(x <= 0) return;
 
     const k = getK();
     const E = 0.5 * k * (x*x);
-    let v = Math.sqrt((2*E)/1.0);
+    let v = Math.sqrt((2*E) / 1.0);
 
     v *= 1100;
     v = Math.min(v, 1600);
 
     ball.active = true;
-    ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
-    ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+    ball.x = launcher.baseX + launcher.axisX*(launcher.restLen + ball.r + 2);
+    ball.y = launcher.baseY + launcher.axisY*(launcher.restLen + ball.r + 2);
     ball.vx = launcher.axisX * v;
     ball.vy = launcher.axisY * v;
 
@@ -420,8 +478,8 @@
     if(hitKnob(p)){
       launcher.dragging = true;
       if(!ball.active){
-        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
-        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen + ball.r + 2);
+        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen + ball.r + 2);
       }
     }
   });
@@ -441,17 +499,17 @@
   });
 
   // -------------------------
-  // Touch events（★ノブを掴んだ時だけスクロール固定）
+  // Touch events（★ノブの時だけスクロール固定）
   // -------------------------
   canvas.addEventListener("touchstart", (e)=>{
     const p = pointerPos(e);
     if(hitKnob(p)){
       launcher.dragging = true;
-      e.preventDefault(); // ノブを掴んだ時だけスクロール開始を止める
+      e.preventDefault(); // ノブ掴んだ瞬間だけスクロール開始を止める
 
       if(!ball.active){
-        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
-        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen + ball.r + 2);
+        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen + ball.r + 2);
       }
     }
   }, {passive:false});
@@ -472,7 +530,7 @@
   });
 
   // -------------------------
-  // UI
+  // UI label updates
   // -------------------------
   function updateUI(){
     dLabel.textContent = dEl.value;
@@ -491,6 +549,9 @@
     if(!ball.active && !launcher.dragging) statusEl.textContent = "ノブをドラッグして押し込んでね";
   }
 
+  // -------------------------
+  // Step
+  // -------------------------
   function step(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
@@ -504,15 +565,15 @@
       ball.x += ball.vx * dt;
       ball.y += ball.vy * dt;
 
-      if(ball.x < -200 || ball.x > w+200 || ball.y < -300 || ball.y > h+300){
+      if(ball.x < -220 || ball.x > w+220 || ball.y < -320 || ball.y > h+320){
         ball.active = false;
         statusEl.textContent = "画面外！リセットしてもう一回！";
         initPositions();
       }
     } else {
       if(launcher.dragging){
-        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
-        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen + ball.r + 2);
+        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen + ball.r + 2);
       }
     }
 
@@ -523,33 +584,28 @@
       o.y += o.vy * world.dt;
       o.life -= world.dt;
 
-      // 軽い重力
       if(o.type !== "ufo") o.vy += 30 * world.dt;
 
-      // UFO：溶ける
       if(o.type === "ufo" && o.fade){
         o.alpha = Math.max(0, Math.min(1, o.life / 2));
       }
-
-      // 流れ星：薄く・小さく
       if(o.type === "star"){
-        const t = Math.max(0, o.life / o.maxLife); // 1 → 0
+        const t = Math.max(0, o.life / o.maxLife);
         o.alpha = t;
         o.size = Math.max(12, o.size * 0.985);
       }
-
-      if(o.life <= 0 || o.x < -400 || o.x > w+400 || o.y < -400 || o.y > h+400){
+      if(o.life <= 0 || o.x < -420 || o.x > w+420 || o.y < -420 || o.y > h+420){
         bgObjects.splice(i,1);
       }
     }
 
-    // win check
-    const gp = goalPos();
-    const dx = ball.x - gp.x, dy = ball.y - gp.y;
-    if(Math.hypot(dx,dy) <= gp.r + ball.r){
+    // win check（ランダム位置の goalState を使う）
+    const dx = ball.x - goalState.x;
+    const dy = ball.y - goalState.y;
+    if(Math.hypot(dx,dy) <= goalState.r + ball.r){
       ball.active = false;
-      statusEl.textContent = `🎉 ${gp.name} 到達！ 次の天体へ！`;
-      setGoal(goalIndex+1);
+      statusEl.textContent = `🎉 ${goalState.name} 到達！ 次の天体へ！`;
+      setGoal(goalIndex + 1);
       initPositions();
     }
   }
@@ -561,32 +617,19 @@
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
 
-    // まずDPR前提の座標系に戻す（CSSピクセルで描く）
-    ctx.setTransform(dpr,0,0,dpr,0,0);
     ctx.clearRect(0,0,w,h);
 
-    // ★スマホは「宇宙だけ」少し引いて見える範囲を広げる
-    //   0.70 くらいが「見える範囲ほぼ2倍（面積）」に近い（0.5だと小さすぎやすい）
-    const isMobile = window.matchMedia("(max-width: 900px)").matches;
-    const worldScale = isMobile ? 0.70 : 1.0;
-
-    // ===== 宇宙レイヤー（スケールあり） =====
-    ctx.save();
-    ctx.translate(w/2, h/2);
-    ctx.scale(worldScale, worldScale);
-    ctx.translate(-w/2, -h/2);
-
-    // stars
+    // stars（先に描く）
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = "white";
-    for(let i=0;i<60;i++){
+    for(let i=0;i<70;i++){
       const x = (i*97)%w;
       const y = (i*53)%h;
       ctx.fillRect(x, y, 1, 1);
     }
     ctx.globalAlpha = 1;
 
-    // bg objects
+    // bg objects（当たり判定なし）
     bgObjects.forEach(o => {
       const img = bgImages[o.type];
       if(!img) return;
@@ -597,24 +640,41 @@
       ctx.restore();
     });
 
-    // goal（天体）
-    const gp = goalPos();
-    ctx.fillStyle = "rgba(103,232,249,.16)";
-    ctx.strokeStyle = "rgba(103,232,249,.7)";
-    ctx.lineWidth = 2;
+    // goal（天体画像＋ふわっと光）
+    const gpImg = planetImgs[goalState.key];
+    const gr = goalState.r;
+
+    // glow
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = "rgba(103,232,249,1)";
     ctx.beginPath();
-    ctx.arc(gp.x,gp.y,gp.r,0,Math.PI*2);
-    ctx.fill(); ctx.stroke();
-
-    ctx.fillStyle = "rgba(231,238,252,.9)";
-    ctx.font = "800 16px system-ui";
-    ctx.fillText(gp.name, gp.x - gp.r, gp.y - gp.r - 10);
-
+    ctx.arc(goalState.x, goalState.y, gr*1.35, 0, Math.PI*2);
+    ctx.fill();
     ctx.restore();
-    // ===== 宇宙レイヤーここまで =====
 
+    // planet image (円でクリップして描画)
+    if(gpImg && gpImg.complete && gpImg.naturalWidth > 0){
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(goalState.x, goalState.y, gr, 0, Math.PI*2);
+      ctx.clip();
+      ctx.drawImage(gpImg, goalState.x - gr, goalState.y - gr, gr*2, gr*2);
+      ctx.restore();
+    } else {
+      // 画像がまだなら簡易円
+      ctx.fillStyle = "rgba(103,232,249,.22)";
+      ctx.strokeStyle = "rgba(103,232,249,.8)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(goalState.x, goalState.y, gr, 0, Math.PI*2);
+      ctx.fill(); ctx.stroke();
+    }
 
-    // ===== 発射台レイヤー（スケールなし・画面固定） =====
+    // label
+    ctx.fillStyle = "rgba(231,238,252,.92)";
+    ctx.font = "800 16px system-ui";
+    ctx.fillText(goalState.name, goalState.x - gr, goalState.y - gr - 10);
 
     // ground line
     ctx.strokeStyle = "rgba(255,255,255,.10)";
@@ -719,12 +779,10 @@
   }
 
   // init
-  resize();
-  setGoal(0);
-  initPositions();
+  resize();      // ←resize内で initPositions + placeGoalRandom までやる
+  setGoal(0);    // 念のため名前反映
   statusEl.textContent = "ノブをドラッグして押し込んでね";
   requestAnimationFrame(loop);
-
 })();
 </script>
 </body>
