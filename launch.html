@@ -29,6 +29,10 @@
     .box{ padding:10px; border-radius:14px; border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.03); }
     .num{ font-size:18px; font-weight:900; margin-top:2px;}
     .hint{ margin-top:10px; padding:10px; border-radius:14px; border:1px dashed rgba(255,255,255,.18); color:var(--muted); }
+
+    /* 追加：スマホでのスクロール・ズーム等を抑止（ドラッグ操作を快適に） */
+canvas { touch-action: none; }
+
   </style>
 </head>
 <body>
@@ -95,6 +99,16 @@
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
 
+
+
+  // 追加：マスコット画像（リポジトリに astronaut.png を置いてね）
+const mascotImg = new Image();
+mascotImg.src = "astronaut.png";
+let mascotReady = false;
+mascotImg.onload = () => { mascotReady = true; };
+
+
+  
   const dEl = document.getElementById("d");
   const DEl = document.getElementById("D");
   const nEl = document.getElementById("n");
@@ -328,6 +342,13 @@
     launcher.axisY = -1;
   });
 
+// 追加：スマホでドラッグ中にページがスクロールしないようにする（重要）
+canvas.addEventListener("touchmove", (e) => {
+  if (launcher.dragging) e.preventDefault();
+}, { passive: false });
+
+
+  
   // Touch
   canvas.addEventListener("touchstart", (e)=>{
     const p = pointerPos(e);
@@ -518,6 +539,26 @@
       ctx.stroke();
     }
 
+
+    // 追加：マスコット（右下・邪魔にならない位置）
+    if (mascotReady) {
+      const mw = 90;                 // サイズ（好みで調整OK）
+      const mh = mw;
+      const mx = w - mw - 18;        // 右端から
+      const my = h - mh - 28;        // 下端から（地面ラインより少し上）
+      ctx.save();
+      ctx.globalAlpha = 0.85;        // 目立ちすぎ防止
+      ctx.drawImage(mascotImg, mx, my, mw, mh);
+      ctx.restore();
+    }
+
+
+
+
+
+
+
+    
     requestAnimationFrame(draw);
   }
 
