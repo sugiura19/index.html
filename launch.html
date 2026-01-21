@@ -298,7 +298,7 @@ function spawnShootingStar(){
 
   bgObjects.push({
     type: "star",
-    x: Math.random()*w,
+    x: w * (0.65 + Math.random()*0.35),
     y: -50,
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
