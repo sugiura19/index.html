@@ -650,11 +650,34 @@ if(o.type === "star"){
     ctx.arc(end.x,end.y,launcher.knobR,0,Math.PI*2);
     ctx.fill(); ctx.stroke();
 
-    // ball
-    ctx.fillStyle = "rgba(231,238,252,.92)";
-    ctx.beginPath();
-    ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
-    ctx.fill();
+   // ball（ロゴ画像を丸く描画）
+if (logoReady) {
+  ctx.save();
+
+  // 丸でクリップ
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.clip();
+
+  // 画像描画（中心基準）
+  ctx.drawImage(
+    logoImg,
+    ball.x - ball.r,
+    ball.y - ball.r,
+    ball.r * 2,
+    ball.r * 2
+  );
+
+  ctx.restore();
+} else {
+  // 読み込み前の保険
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 
     // helper arrow
     if(launcher.dragging){
