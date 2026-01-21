@@ -296,8 +296,8 @@
       type: "star",
       x: Math.random()*w,
       y: -50,
-      vx: -250 + Math.random()*500,
-      vy: 320 + Math.random()*240,
+      vx: (-250 + Math.random()*500) * 0.5,
+      vy: (320 + Math.random()*240) * 0.5,
       life: 2.2 + Math.random()*0.8,
       alpha: 1
     });
@@ -310,8 +310,8 @@
       type: "rocket",
       x: Math.random()*w,
       y: h + 70,
-      vx: -80 + Math.random()*160,
-      vy: -420 - Math.random()*260,
+      vx: (-80 + Math.random()*160) * 0.5,
+      vy: (-420 - Math.random()*260) * 0.5,
       life: 2.6 + Math.random()*1.2,
       alpha: 1
     });
@@ -323,8 +323,8 @@
       type: "satellite",
       x: -90,
       y: Math.random()*h*0.55,
-      vx: 260 + Math.random()*220,
-      vy: 60 + Math.random()*90,
+      vx: (260 + Math.random()*220) * 0.5,
+      vy: (60 + Math.random()*90) * 0.5,
       life: 3.2 + Math.random()*1.4,
       alpha: 1
     });
@@ -337,8 +337,8 @@
       type: "ufo",
       x: Math.random()*w,
       y: Math.random()*h*0.55,
-      vx: -240 + Math.random()*480,
-      vy: -180 + Math.random()*360,
+      vx: (-240 + Math.random()*480) * 0.5,
+      vy: (-180 + Math.random()*360) * 0.5,
       life: 3 + Math.random()*3, // 滞在時間ランダム
       alpha: 1,
       fade: true
@@ -483,7 +483,7 @@
       o.life -= world.dt;
 
       // 衛星/流れ星/ロケットも少しだけ弧っぽく（ゆるい重力）
-      if(o.type !== "ufo") o.vy += 60 * world.dt;
+      if(o.type !== "ufo") o.vy += 30 * world.dt;
 
       // UFO：背景に溶けて消える（残り時間でフェード）
       if(o.fade){
@@ -527,7 +527,7 @@
     bgObjects.forEach(o => {
       const img = bgImages[o.type];
       if(!img) return;
-      const size = (o.type === "ufo") ? 62 : 44;
+      const size = (o.type === "ufo") ? 62*3 : 44*3;
       ctx.save();
       ctx.globalAlpha = (o.alpha ?? 1);
       ctx.drawImage(img, o.x, o.y, size, size);
