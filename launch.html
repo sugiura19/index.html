@@ -537,7 +537,7 @@ if(o.type === "star"){
     bgObjects.forEach(o => {
       const img = bgImages[o.type];
       if(!img) return;
-      const size = o.size ?? ((o.type === "ufo") ? 62*10 : 44*10);
+      const size = o.size ?? ((o.type === "ufo") ? 62*4 : 44*4);
 
       ctx.save();
       ctx.globalAlpha = (o.alpha ?? 1);
