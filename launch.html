@@ -14,7 +14,7 @@
     h1{ font-size:20px; margin:6px 0 10px; }
     .grid{ display:grid; grid-template-columns: 1.35fr .65fr; gap:12px;}
     .card{ background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.10); border-radius:16px; padding:12px; box-shadow:0 12px 32px rgba(0,0,0,.25);}
-    canvas{ width:100%; height:520px; background: rgba(255,255,255,.02); border-radius:14px; border:1px solid rgba(255,255,255,.10); }
+    canvas{ width:100%; height:520px; background: rgba(255,255,255,.02); border-radius:14px; border:1px solid rgba(255,255,255,.10); touch-action:none; }
     label{ display:block; font-size:12px; color:var(--muted); margin-top:10px; margin-bottom:4px;}
     input[type="range"]{ width:100%; }
     .row{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -29,10 +29,6 @@
     .box{ padding:10px; border-radius:14px; border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.03); }
     .num{ font-size:18px; font-weight:900; margin-top:2px;}
     .hint{ margin-top:10px; padding:10px; border-radius:14px; border:1px dashed rgba(255,255,255,.18); color:var(--muted); }
-
-    /* 追加：スマホでのスクロール・ズーム等を抑止（ドラッグ操作を快適に） */
-canvas { touch-action: none; }
-
   </style>
 </head>
 <body>
@@ -99,16 +95,6 @@ canvas { touch-action: none; }
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
 
-
-
-  // 追加：マスコット画像（リポジトリに astronaut.png を置いてね）
-const mascotImg = new Image();
-mascotImg.src = "astronaut.png";
-let mascotReady = false;
-mascotImg.onload = () => { mascotReady = true; };
-
-
-  
   const dEl = document.getElementById("d");
   const DEl = document.getElementById("D");
   const nEl = document.getElementById("n");
@@ -139,12 +125,36 @@ mascotImg.onload = () => { mascotReady = true; };
   const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
   const lerp = (a,b,t)=>a+(b-a)*t;
 
+  // 追加：スマホでドラッグ中にページがスクロールしないようにする（重要）
+  canvas.addEventListener("touchmove", (e) => {
+    if (launcher.dragging) e.preventDefault();
+  }, { passive: false });
+
+  // -------------------------
+  // Images（1回だけロード）
+  // -------------------------
+  const mascotImg = new Image();
+  mascotImg.src = "astronaut.png";
+  let mascotReady = false;
+  mascotImg.onload = () => { mascotReady = true; };
+
+  const bgImages = {
+    star: new Image(),
+    rocket: new Image(),
+    satellite: new Image(),
+    ufo: new Image(),
+  };
+  bgImages.star.src = "shooting_star.png";
+  bgImages.rocket.src = "rocket.png";
+  bgImages.satellite.src = "satellite.png";
+  bgImages.ufo.src = "ufo.png";
+
   // -------------------------
   // Toy physics world
   // -------------------------
   const world = {
-    g: 520,          // gravity (px/s^2)
-    drag: 0.985,     // air drag multiplier per frame-ish
+    g: 520,
+    drag: 0.985,
     dt: 1/60,
   };
 
@@ -158,7 +168,7 @@ mascotImg.onload = () => { mascotReady = true; };
   // Spring launcher (bottom center)
   const launcher = {
     baseX: 0, baseY: 0,
-    axisX: 0, axisY: -1,      // launch axis direction
+    axisX: 0, axisY: -1,
     restLen: 120,
     len: 120,
     minLen: 60,
@@ -166,6 +176,9 @@ mascotImg.onload = () => { mascotReady = true; };
     knobR: 16,
     dragging: false,
   };
+
+  // Background objects（当たり判定なし）
+  const bgObjects = [];
 
   // Goals (planets)
   const goals = [
@@ -179,18 +192,14 @@ mascotImg.onload = () => { mascotReady = true; };
   let goalIndex = 0;
 
   function getK(){
-    // Compression spring k approx: k ~ G d^4 / (8 n D^3)
-    // Use a scaled toy constant for nice numbers.
     const d = Number(dEl.value);
     const D = Number(DEl.value);
     const n = Number(nEl.value);
     const G = 80; // toy shear modulus
-    const k = (G * Math.pow(d,4)) / (8 * n * Math.pow(D,3));
-    return k; // small number
+    return (G * Math.pow(d,4)) / (8 * n * Math.pow(D,3));
   }
 
   function currentX(){
-    // compression amount from rest (positive when compressed)
     return Math.round(clamp(launcher.restLen - launcher.len, 0, 999));
   }
 
@@ -221,9 +230,7 @@ mascotImg.onload = () => { mascotReady = true; };
     goalNameEl.textContent = goals[goalIndex].name;
   }
 
-  nextGoalBtn.addEventListener("click", ()=>{
-    setGoal(goalIndex+1);
-  });
+  nextGoalBtn.addEventListener("click", ()=> setGoal(goalIndex+1));
 
   resetBtn.addEventListener("click", ()=>{
     initPositions();
@@ -256,12 +263,10 @@ mascotImg.onload = () => { mascotReady = true; };
   }
 
   function setFromPointer(p){
-    // Direction: from base to pointer (but limited)
     let dx = p.x - launcher.baseX;
     let dy = p.y - launcher.baseY;
 
-    // We want generally upward launches: constrain dy to be negative-ish
-    dy = Math.min(dy, -30);
+    dy = Math.min(dy, -30); // generally upward
 
     let len = Math.hypot(dx,dy);
     if(len < 1) len = 1;
@@ -269,39 +274,100 @@ mascotImg.onload = () => { mascotReady = true; };
     let ax = dx/len;
     let ay = dy/len;
 
-    // Gentle angle variation: constrain to +/- 25 degrees from straight up
-    // (assist ON makes it stronger)
     const maxDeg = assist ? 18 : 25;
     const max = maxDeg * Math.PI/180;
 
-    // angle from straight up: straight up vector is (0,-1)
-    let angle = Math.atan2(ax, -ay); // 0 means straight up
+    let angle = Math.atan2(ax, -ay); // 0 = straight up
     angle = clamp(angle, -max, max);
 
-    // rebuild axis from angle
     launcher.axisX = Math.sin(angle);
     launcher.axisY = -Math.cos(angle);
 
-    // Length along axis: pointer projection
-    // Project (dx,dy) onto axis, then clamp
     const proj = dx*launcher.axisX + dy*launcher.axisY;
     launcher.len = clamp(proj, launcher.minLen, launcher.restLen);
   }
+
+  // -------------------------
+  // Spawn functions（4種類）
+  // -------------------------
+  function spawnShootingStar(){
+    const w = canvas.getBoundingClientRect().width;
+    bgObjects.push({
+      type: "star",
+      x: Math.random()*w,
+      y: -50,
+      vx: -250 + Math.random()*500,
+      vy: 320 + Math.random()*240,
+      life: 2.2 + Math.random()*0.8,
+      alpha: 1
+    });
+  }
+
+  function spawnRocket(){
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    bgObjects.push({
+      type: "rocket",
+      x: Math.random()*w,
+      y: h + 70,
+      vx: -80 + Math.random()*160,
+      vy: -420 - Math.random()*260,
+      life: 2.6 + Math.random()*1.2,
+      alpha: 1
+    });
+  }
+
+  function spawnSatellite(){
+    const h = canvas.getBoundingClientRect().height;
+    bgObjects.push({
+      type: "satellite",
+      x: -90,
+      y: Math.random()*h*0.55,
+      vx: 260 + Math.random()*220,
+      vy: 60 + Math.random()*90,
+      life: 3.2 + Math.random()*1.4,
+      alpha: 1
+    });
+  }
+
+  function spawnUFO(){
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    bgObjects.push({
+      type: "ufo",
+      x: Math.random()*w,
+      y: Math.random()*h*0.55,
+      vx: -240 + Math.random()*480,
+      vy: -180 + Math.random()*360,
+      life: 3 + Math.random()*3, // 滞在時間ランダム
+      alpha: 1,
+      fade: true
+    });
+  }
+
+  // 5秒に1回くらい（複数同時もあり）
+  setInterval(() => {
+    // 0〜2個出る（体感で賑やか）
+    const count = Math.random() < 0.35 ? 2 : 1;
+    for(let i=0;i<count;i++){
+      const r = Math.random();
+      if(r < 0.25) spawnShootingStar();
+      else if(r < 0.5) spawnRocket();
+      else if(r < 0.75) spawnSatellite();
+      else spawnUFO();
+    }
+  }, 5000);
 
   function launch(){
     const x = currentX();
     if(x <= 0) return;
 
     const k = getK();
-    // Toy energy: E ~ 0.5*k*x^2, v ~ sqrt(2E/m)
     const m = 1.0;
     const E = 0.5 * k * (x*x);
     let v = Math.sqrt((2*E)/m);
 
-    // Scale to pixel game feel
-    v *= 1100; // tuning
-
-    // Cap speed so it doesn't instantly exit
+    v *= 1100;
     v = Math.min(v, 1600);
 
     ball.active = true;
@@ -319,7 +385,6 @@ mascotImg.onload = () => { mascotReady = true; };
     if(hitKnob(p)){
       launcher.dragging = true;
       if(!ball.active){
-        // keep ball parked on launcher tip while aiming
         ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
         ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
       }
@@ -334,21 +399,12 @@ mascotImg.onload = () => { mascotReady = true; };
   window.addEventListener("mouseup", ()=>{
     if(!launcher.dragging) return;
     launcher.dragging = false;
-    // release => launch
     launch();
-    // spring returns
     launcher.len = launcher.restLen;
     launcher.axisX = 0;
     launcher.axisY = -1;
   });
 
-// 追加：スマホでドラッグ中にページがスクロールしないようにする（重要）
-canvas.addEventListener("touchmove", (e) => {
-  if (launcher.dragging) e.preventDefault();
-}, { passive: false });
-
-
-  
   // Touch
   canvas.addEventListener("touchstart", (e)=>{
     const p = pointerPos(e);
@@ -382,47 +438,61 @@ canvas.addEventListener("touchmove", (e) => {
     nLabel.textContent = nEl.value;
 
     const k = getK();
-    // show friendly number
     const kShow = (k*1e5).toFixed(1);
     kLabel.textContent = kShow;
 
     const x = currentX();
     xLabel.textContent = x;
 
-    // power bar from x + k
     const power = clamp((k*1e5) * (x/90), 0, 120);
     pBar.style.width = `${clamp(power,0,100)}%`;
 
     if(!ball.active && !launcher.dragging) statusEl.textContent = "ノブをドラッグして押し込んでね";
   }
 
-  // Physics step
   function step(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
 
+    // ball physics
     if(ball.active){
       const dt = world.dt;
-
       ball.vy += world.g * dt;
-
       ball.vx *= world.drag;
       ball.vy *= world.drag;
-
       ball.x += ball.vx * dt;
       ball.y += ball.vy * dt;
 
-      // bounds: if out -> stop & reset softly
       if(ball.x < -200 || ball.x > w+200 || ball.y < -300 || ball.y > h+300){
         ball.active = false;
         statusEl.textContent = "画面外！リセットしてもう一回！";
         initPositions();
       }
     } else {
-      // park ball at spring tip while aiming
       if(launcher.dragging){
         ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
         ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+      }
+    }
+
+    // bg objects update（ここが正しい場所）
+    for(let i = bgObjects.length-1; i >= 0; i--){
+      const o = bgObjects[i];
+      o.x += o.vx * world.dt;
+      o.y += o.vy * world.dt;
+      o.life -= world.dt;
+
+      // 衛星/流れ星/ロケットも少しだけ弧っぽく（ゆるい重力）
+      if(o.type !== "ufo") o.vy += 60 * world.dt;
+
+      // UFO：背景に溶けて消える（残り時間でフェード）
+      if(o.fade){
+        o.alpha = Math.max(0, Math.min(1, o.life / 2));
+      }
+
+      // 画面外でも消す（保険）
+      if(o.life <= 0 || o.x < -200 || o.x > w+200 || o.y < -200 || o.y > h+200){
+        bgObjects.splice(i,1);
       }
     }
 
@@ -437,14 +507,13 @@ canvas.addEventListener("touchmove", (e) => {
     }
   }
 
-  // Drawing
   function draw(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
 
     ctx.clearRect(0,0,w,h);
 
-    // stars
+    // stars（先に描く）
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = "white";
     for(let i=0;i<60;i++){
@@ -453,6 +522,17 @@ canvas.addEventListener("touchmove", (e) => {
       ctx.fillRect(x, y, 1, 1);
     }
     ctx.globalAlpha = 1;
+
+    // bg objects（当たり判定なし）
+    bgObjects.forEach(o => {
+      const img = bgImages[o.type];
+      if(!img) return;
+      const size = (o.type === "ufo") ? 62 : 44;
+      ctx.save();
+      ctx.globalAlpha = (o.alpha ?? 1);
+      ctx.drawImage(img, o.x, o.y, size, size);
+      ctx.restore();
+    });
 
     // goal
     const gp = goalPos();
@@ -495,7 +575,6 @@ canvas.addEventListener("touchmove", (e) => {
     const perpX = -dirY;
     const perpY = dirX;
 
-    // amplitude depends slightly on D (visual)
     const amp = 10 + (Number(DEl.value)/40)*14;
 
     ctx.strokeStyle = "rgba(167,139,250,.85)";
@@ -528,7 +607,7 @@ canvas.addEventListener("touchmove", (e) => {
     ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
     ctx.fill();
 
-    // helper arrow (aim)
+    // helper arrow
     if(launcher.dragging){
       ctx.strokeStyle = "rgba(103,232,249,.65)";
       ctx.lineWidth = 3;
@@ -539,32 +618,23 @@ canvas.addEventListener("touchmove", (e) => {
       ctx.stroke();
     }
 
-
-    // 追加：マスコット（右下・邪魔にならない位置）
+    // mascot（右下）
     if (mascotReady) {
-      const mw = 90;                 // サイズ（好みで調整OK）
+      const mw = 90;
       const mh = mw;
-      const mx = w - mw - 18;        // 右端から
-      const my = h - mh - 28;        // 下端から（地面ラインより少し上）
+      const mx = w - mw - 18;
+      const my = h - mh - 28;
       ctx.save();
-      ctx.globalAlpha = 0.85;        // 目立ちすぎ防止
+      ctx.globalAlpha = 0.85;
       ctx.drawImage(mascotImg, mx, my, mw, mh);
       ctx.restore();
     }
-
-
-
-
-
-
-
-    
-    requestAnimationFrame(draw);
   }
 
   function loop(){
     updateUI();
     step();
+    draw();
     requestAnimationFrame(loop);
   }
 
@@ -573,11 +643,8 @@ canvas.addEventListener("touchmove", (e) => {
   setGoal(0);
   initPositions();
   statusEl.textContent = "ノブをドラッグして押し込んでね";
-  requestAnimationFrame(draw);
   requestAnimationFrame(loop);
 
-  // UI hooks
-  [dEl,DEl,nEl].forEach(el=>el.addEventListener("input", ()=>{}));
 })();
 </script>
 </body>
