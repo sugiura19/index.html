@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Spring Playground - バネで遊ぶ</title>
+  <style>
+    :root{
+      --bg:#0b1220; --card:#111a2e; --text:#e7eefc; --muted:#a9b7d6;
+      --accent:#67e8f9; --accent2:#a78bfa; --danger:#fb7185;
+    }
+    body{ margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: radial-gradient(1200px 700px at 30% 20%, #182448, var(--bg)); color:var(--text); }
+    .wrap{ max-width:980px; margin:0 auto; padding:18px; }
+    h1{ font-size:22px; margin:6px 0 10px; }
+    .grid{ display:grid; grid-template-columns: 1.2fr .8fr; gap:14px; }
+    .card{ background: color-mix(in oklab, var(--card) 92%, black); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    label{ font-size:12px; color:var(--muted); display:block; margin-bottom:4px;}
+    input[type="range"]{ width:100%; }
+    .small{ font-size:12px; color:var(--muted); }
+    .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); }
+    .btn{
+      cursor:pointer; border:none; color:var(--text);
+      background: linear-gradient(135deg, rgba(103,232,249,.35), rgba(167,139,250,.25));
+      padding:10px 12px; border-radius:12px; font-weight:700;
+      transition: transform .05s ease;
+    }
+    .btn:active{ transform: translateY(1px); }
+    canvas{ width:100%; height:420px; background: rgba(255,255,255,.02); border-radius:14px; border:1px solid rgba(255,255,255,.08); }
+    .meter{ height:10px; border-radius:999px; background: rgba(255,255,255,.08); overflow:hidden; }
+    .meter > div{ height:100%; width:0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+    .stat{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;}
+    .stat .box{ padding:10px; border-radius:14px; border:1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); }
+    .stat .num{ font-size:18px; font-weight:800; margin-top:2px;}
+    .hint{ margin-top:10px; padding:10px; border-radius:14px; border:1px dashed rgba(255,255,255,.18); color:var(--muted); }
+    @media (max-width:900px){ .grid{ grid-template-columns: 1fr; } canvas{ height:360px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Spring Playground 🌀（バネで遊ぶ）</h1>
+    <div class="grid">
+      <div class="card">
+        <canvas id="c"></canvas>
+        <div class="hint">
+          操作：バネの先っぽ（丸いノブ）をドラッグして伸ばしたり縮めたり。<br/>
+          目標の力に近づけると「やった！」になるよ。
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <div class="pill"><span>🎯 目標の力</span><b id="targetLabel">—</b></div>
+          <button class="btn" id="newTarget">目標をつくる</button>
+        </div>
+
+        <div style="margin-top:12px;">
+          <label>バネの硬さ k（大きいほど硬い）</label>
+          <input id="k" type="range" min="1" max="80" value="25" />
+          <div class="small">いまのk：<b id="kLabel">25</b></div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <label>遊びやすさ（ドラッグの重さ）</label>
+          <input id="feel" type="range" min="0" max="100" value="55" />
+          <div class="small">重い← →軽い（操作感だけ変わる）</div>
+        </div>
+
+        <div class="stat">
+          <div class="box">
+            <div class="small">伸び/縮み x（見た目の距離）</div>
+            <div class="num"><span id="xLabel">0</span> px</div>
+          </div>
+          <div class="box">
+            <div class="small">力 F = kx（ゲーム用の単位）</div>
+            <div class="num"><span id="fLabel">0</span></div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="row" style="justify-content:space-between;">
+            <div class="small">力メーター</div>
+            <div class="small" id="status">—</div>
+          </div>
+          <div class="meter"><div id="meterBar"></div></div>
+        </div>
+
+        <div style="margin-top:12px;" class="small">
+          📌 学びポイント：<br/>
+          ・「硬さ k」が同じでも、伸ばす量 x が大きいと力 F も大きくなる。<br/>
+          ・硬いバネは小さく動かしても強い力が出る。柔らかいバネは大きく動かさないと力が出ない。
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  // High-DPI
+  function resize(){
+    const r = canvas.getBoundingClientRect();
+    const dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(r.width * dpr);
+    canvas.height = Math.floor(r.height * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resize);
+
+  const kEl = document.getElementById("k");
+  const feelEl = document.getElementById("feel");
+  const kLabel = document.getElementById("kLabel");
+  const xLabel = document.getElementById("xLabel");
+  const fLabel = document.getElementById("fLabel");
+  const meterBar = document.getElementById("meterBar");
+  const statusEl = document.getElementById("status");
+
+  const targetLabel = document.getElementById("targetLabel");
+  const newTargetBtn = document.getElementById("newTarget");
+
+  // Scene
+  let dragging = false;
+
+  const spring = {
+    anchor: {x: 140, y: 90},
+    baseLen: 220,
+    minLen: 110,
+    maxLen: 340,
+    len: 220,
+    coils: 12,
+    amp: 18,
+    knobR: 16,
+  };
+
+  let targetF = null;
+
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function randInt(a,b){ return Math.floor(a + Math.random()*(b-a+1)); }
+
+  function setNewTarget(){
+    // target force based on current k range (game unit)
+    const k = Number(kEl.value);
+    // pick x around 40..180
+    const x = randInt(40, 180);
+    targetF = Math.round(k * x / 20); // scale down so numbers are friendly
+    targetLabel.textContent = targetF;
+    statusEl.textContent = "目標に合わせよう";
+  }
+
+  newTargetBtn.addEventListener("click", setNewTarget);
+
+  kEl.addEventListener("input", () => {
+    kLabel.textContent = kEl.value;
+  });
+
+  // Convert spring length to "x" (deformation) around baseLen
+  function deformation(){
+    return Math.round(spring.len - spring.baseLen);
+  }
+
+  function force(){
+    const k = Number(kEl.value);
+    const x = Math.abs(deformation()); // magnitude
+    // Game-unit scaling: F = kx, but scaled to be friendly
+    return Math.round((k * x) / 20);
+  }
+
+  function knobPos(){
+    return { x: spring.anchor.x, y: spring.anchor.y + spring.len };
+  }
+
+  function draw(){
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+
+    ctx.clearRect(0,0,w,h);
+
+    // Background grid
+    ctx.globalAlpha = 0.25;
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.lineWidth = 1;
+    for(let y=0;y<h;y+=40){
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+    }
+    for(let x=0;x<w;x+=60){
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Title
+    ctx.fillStyle = "rgba(231,238,252,.9)";
+    ctx.font = "700 16px system-ui";
+    ctx.fillText("ドラッグしてバネを伸ばす/縮める", 14, 26);
+
+    // Anchor plate
+    ctx.fillStyle = "rgba(255,255,255,.07)";
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(spring.anchor.x-60, spring.anchor.y-18, 120, 36, 10);
+    ctx.fill(); ctx.stroke();
+
+    // Anchor dot
+    ctx.fillStyle = "rgba(103,232,249,.9)";
+    ctx.beginPath();
+    ctx.arc(spring.anchor.x, spring.anchor.y, 6, 0, Math.PI*2);
+    ctx.fill();
+
+    // Spring line
+    const top = spring.anchor;
+    const bottom = knobPos();
+    const total = bottom.y - top.y;
+    const coils = spring.coils;
+    const segs = coils * 10;
+
+    ctx.lineWidth = 6;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(167,139,250,.85)";
+    ctx.beginPath();
+
+    for(let i=0;i<=segs;i++){
+      const t = i/segs;
+      const y = top.y + total*t;
+      // sinusoidal x offset around anchor.x
+      const phase = t * coils * Math.PI * 2;
+      const xoff = Math.sin(phase) * spring.amp * (0.65 + 0.35*Math.cos(t*Math.PI)); // taper a bit
+      const x = top.x + xoff;
+      if(i===0) ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+
+    // Knob
+    const kp = bottom;
+    ctx.fillStyle = "rgba(103,232,249,.9)";
+    ctx.strokeStyle = "rgba(255,255,255,.55)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(kp.x, kp.y, spring.knobR, 0, Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    // Labels on canvas
+    const x = deformation();
+    const F = force();
+
+    ctx.fillStyle = "rgba(231,238,252,.85)";
+    ctx.font = "600 14px system-ui";
+    ctx.fillText(`x = ${x}px`, 14, h-46);
+    ctx.fillText(`F = ${F}`, 14, h-24);
+
+    // Target feedback
+    if(targetF !== null){
+      const diff = Math.abs(F - targetF);
+      const ok = diff <= 3;
+      ctx.fillStyle = ok ? "rgba(103,232,249,.95)" : "rgba(251,113,133,.9)";
+      ctx.font = "800 18px system-ui";
+      ctx.fillText(ok ? "やった！目標に近い！" : `目標:${targetF}（差:${diff}）`, 14, 56);
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  // Mouse/touch events
+  function pointerPos(e){
+    const r = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: clientX - r.left, y: clientY - r.top };
+  }
+
+  function hitKnob(p){
+    const kp = knobPos();
+    const dx = p.x - kp.x, dy = p.y - kp.y;
+    return (dx*dx + dy*dy) <= (spring.knobR+8)*(spring.knobR+8);
+  }
+
+  function setLenFromPointer(p){
+    // Feel changes how sensitive dragging is
+    const feel = Number(feelEl.value); // 0..100
+    const sens = 0.6 + (feel/100)*1.4; // 0.6..2.0
+    const dy = (p.y - spring.anchor.y) / sens;
+    spring.len = clamp(dy, spring.minLen, spring.maxLen);
+  }
+
+  function updateUI(){
+    const x = deformation();
+    const F = force();
+    xLabel.textContent = x;
+    fLabel.textContent = F;
+
+    const meter = clamp(F, 0, 300);
+    meterBar.style.width = `${(meter/300)*100}%`;
+
+    if(targetF !== null){
+      const diff = Math.abs(F - targetF);
+      if(diff <= 3) statusEl.textContent = "🎉 ぴったり！";
+      else if(diff <= 12) statusEl.textContent = "惜しい！";
+      else statusEl.textContent = "もっと合わせよう";
+    }else{
+      statusEl.textContent = "目標をつくって遊べるよ";
+    }
+  }
+
+  // Animation tick for UI
+  function tick(){
+    updateUI();
+    requestAnimationFrame(tick);
+  }
+
+  canvas.addEventListener("mousedown", (e)=>{
+    const p = pointerPos(e);
+    if(hitKnob(p)){ dragging = true; }
+  });
+  window.addEventListener("mousemove", (e)=>{
+    if(!dragging) return;
+    setLenFromPointer(pointerPos(e));
+  });
+  window.addEventListener("mouseup", ()=> dragging = false);
+
+  // Touch
+  canvas.addEventListener("touchstart", (e)=>{
+    const p = pointerPos(e);
+    if(hitKnob(p)){ dragging = true; }
+  }, {passive:true});
+  window.addEventListener("touchmove", (e)=>{
+    if(!dragging) return;
+    setLenFromPointer(pointerPos(e));
+  }, {passive:true});
+  window.addEventListener("touchend", ()=> dragging = false);
+
+  // init
+  resize();
+  kLabel.textContent = kEl.value;
+  setNewTarget();
+  requestAnimationFrame(draw);
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
