@@ -293,64 +293,81 @@
 function spawnShootingStar(){
   const w = canvas.getBoundingClientRect().width;
 
-  const angle = (225 + (-15 + Math.random()*30)) * Math.PI/180; // 右上→左下 ±15°
-  const speed = (380 + Math.random()*260) * 0.2;               // 速度は半分
+  // 右上→左下（225°）を基本に、±15°ゆらす
+  const angle = (225 + (-15 + Math.random()*30)) * Math.PI/180;
+
+  // “半分くらいの速さ”にしたいので *0.5（←ここが重要）
+  const speed = (380 + Math.random()*260) * 0.5;
+
+  const life = 6.0; // 遅めでも画面内に入って見えるように寿命を伸ばす
 
   bgObjects.push({
     type: "star",
-    x: w * (0.65 + Math.random()*0.35),
-    y: -50,
+    x: w * (0.65 + Math.random()*0.35), // 右寄りから出る
+    y: -20,                              // 少しだけ外
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
-    life: 2.5,
-    maxLife: 2.5,
-    size: 44*3,
+    life,
+    maxLife: life,
+    size: 44*3,    // ★サイズ3倍（他と揃える）
     alpha: 1
   });
 }
 
+function spawnRocket(){
+  const w = canvas.getBoundingClientRect().width;
+  const h = canvas.getBoundingClientRect().height;
 
-  function spawnRocket(){
-    const w = canvas.getBoundingClientRect().width;
-    const h = canvas.getBoundingClientRect().height;
-    bgObjects.push({
-      type: "rocket",
-      x: Math.random()*w,
-      y: h + 70,
-      vx: (-80 + Math.random()*160) * 0.2,
-      vy: (-420 - Math.random()*260) * 0.2,
-      life: 2.6 + Math.random()*1.2,
-      alpha: 1
-    });
-  }
+  const life = 7.0;
 
-  function spawnSatellite(){
-    const h = canvas.getBoundingClientRect().height;
-    bgObjects.push({
-      type: "satellite",
-      x: -90,
-      y: Math.random()*h*0.55,
-      vx: (260 + Math.random()*220) * 0.2,
-      vy: (60 + Math.random()*90) * 0.2,
-      life: 3.2 + Math.random()*1.4,
-      alpha: 1
-    });
-  }
+  bgObjects.push({
+    type: "rocket",
+    x: Math.random()*w,
+    y: h + 10, // 外に出しすぎない（見えない時間を減らす）
+    vx: (-80 + Math.random()*160) * 0.5,
+    vy: (-420 - Math.random()*260) * 0.5,
+    life,
+    alpha: 1,
+    size: 44*3
+  });
+}
 
-  function spawnUFO(){
-    const w = canvas.getBoundingClientRect().width;
-    const h = canvas.getBoundingClientRect().height;
-    bgObjects.push({
-      type: "ufo",
-      x: Math.random()*w,
-      y: Math.random()*h*0.55,
-      vx: (-240 + Math.random()*480) * 0.2,
-      vy: (-180 + Math.random()*360) * 0.2,
-      life: 3 + Math.random()*3, // 滞在時間ランダム
-      alpha: 1,
-      fade: true
-    });
-  }
+function spawnSatellite(){
+  const h = canvas.getBoundingClientRect().height;
+
+  const life = 8.0;
+
+  bgObjects.push({
+    type: "satellite",
+    x: -30, // 外に出しすぎない
+    y: Math.random()*h*0.55,
+    vx: (260 + Math.random()*220) * 0.5,
+    vy: (60 + Math.random()*90) * 0.5,
+    life,
+    alpha: 1,
+    size: 44*3
+  });
+}
+
+function spawnUFO(){
+  const w = canvas.getBoundingClientRect().width;
+  const h = canvas.getBoundingClientRect().height;
+
+  const life = 6 + Math.random()*6; // 滞在長め（溶けて消えるのが楽しい）
+
+  bgObjects.push({
+    type: "ufo",
+    x: Math.random()*w,
+    y: Math.random()*h*0.55,
+    vx: (-240 + Math.random()*480) * 0.5,
+    vy: (-180 + Math.random()*360) * 0.5,
+    life,
+    alpha: 1,
+    fade: true,
+    size: 62*3 // UFOは元が大きい想定なので62基準
+  });
+}
+
 
   // 5秒に1回くらい（複数同時もあり）
   setInterval(() => {
