@@ -551,7 +551,17 @@
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
 
-    ctx.clearRect(0,0,w,h);
+// ★スマホは世界を0.5倍で描画して「見える範囲」を2倍にする
+const isMobile = window.matchMedia("(max-width: 900px)").matches;
+const viewScale = isMobile ? 0.5 : 1.0;
+
+// いったん通常座標系で全消し（スケール前に消す）
+ctx.setTransform(1,0,0,1,0,0);
+ctx.clearRect(0,0,w,h);
+
+// ここからスケールして描く
+ctx.setTransform(viewScale, 0, 0, viewScale, 0, 0);
+
 
     // stars
     ctx.globalAlpha = 0.35;
@@ -696,6 +706,12 @@
     step();
     draw();
     requestAnimationFrame(loop);
+
+
+    // transformを戻す（次フレームやUI表示の事故防止）
+ctx.setTransform(1,0,0,1,0,0);
+
+    
   }
 
   // init
