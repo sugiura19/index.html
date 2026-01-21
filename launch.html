@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>バネで天体まで飛ばそう</title>
+  <style>
+    :root{
+      --bg:#0b1220; --card:#111a2e; --text:#e7eefc; --muted:#a9b7d6;
+      --accent:#67e8f9; --accent2:#a78bfa; --danger:#fb7185;
+    }
+    body{ margin:0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; background: radial-gradient(1200px 700px at 30% 20%, #182448, var(--bg)); color:var(--text);}
+    .wrap{ max-width:1100px; margin:0 auto; padding:16px; }
+    h1{ font-size:20px; margin:6px 0 10px; }
+    .grid{ display:grid; grid-template-columns: 1.35fr .65fr; gap:12px;}
+    .card{ background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.10); border-radius:16px; padding:12px; box-shadow:0 12px 32px rgba(0,0,0,.25);}
+    canvas{ width:100%; height:520px; background: rgba(255,255,255,.02); border-radius:14px; border:1px solid rgba(255,255,255,.10); }
+    label{ display:block; font-size:12px; color:var(--muted); margin-top:10px; margin-bottom:4px;}
+    input[type="range"]{ width:100%; }
+    .row{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+    .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03); }
+    .btn{ cursor:pointer; border:none; color:var(--text); font-weight:800; padding:10px 12px; border-radius:12px;
+      background: linear-gradient(135deg, rgba(103,232,249,.35), rgba(167,139,250,.25)); }
+    .btn:active{ transform: translateY(1px); }
+    .small{ font-size:12px; color:var(--muted); line-height:1.5; }
+    .meter{ height:10px; border-radius:999px; background: rgba(255,255,255,.10); overflow:hidden; }
+    .meter > div{ height:100%; width:0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+    .stat{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;}
+    .box{ padding:10px; border-radius:14px; border:1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.03); }
+    .num{ font-size:18px; font-weight:900; margin-top:2px;}
+    .hint{ margin-top:10px; padding:10px; border-radius:14px; border:1px dashed rgba(255,255,255,.18); color:var(--muted); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🚀 バネを天体まで飛ばそう（デモ物理）</h1>
+  <div class="grid">
+    <div class="card">
+      <canvas id="c"></canvas>
+      <div class="hint">
+        操作：発射台のノブをドラッグして押し込む → 離すと発射。<br>
+        角度は「ちょっとだけ」変わる（暴走しにくい優しめ設定）。
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="pill">🎯 目標：<b id="goalName">—</b></div>
+        <button class="btn" id="nextGoal">次の天体</button>
+      </div>
+
+      <label>線径 d（太いほど硬い）</label>
+      <input id="d" type="range" min="0.6" max="3.0" step="0.1" value="1.2">
+      <div class="small">d = <b id="dLabel">1.2</b></div>
+
+      <label>コイル径 D（大きいほど柔らかい）</label>
+      <input id="D" type="range" min="6" max="40" step="1" value="16">
+      <div class="small">D = <b id="DLabel">16</b></div>
+
+      <label>有効巻数 n（多いほど柔らかい）</label>
+      <input id="n" type="range" min="2" max="18" step="1" value="8">
+      <div class="small">n = <b id="nLabel">8</b></div>
+
+      <div class="stat">
+        <div class="box">
+          <div class="small">バネ定数っぽい k（遊び用）</div>
+          <div class="num" id="kLabel">—</div>
+        </div>
+        <div class="box">
+          <div class="small">押し込み x（px）</div>
+          <div class="num"><span id="xLabel">0</span></div>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div class="row"><div class="small">発射パワー</div><div class="small" id="status">—</div></div>
+        <div class="meter"><div id="pBar"></div></div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn" id="reset">リセット</button>
+        <button class="btn" id="toggleAssist">角度アシスト：ON</button>
+      </div>
+
+      <div class="small" style="margin-top:12px;">
+        ・式は教育用の「それっぽさ」です（精密設計ではない）。<br>
+        ・硬くしすぎると当たり前に飛ぶので、目標を上げて遊べます。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  const dEl = document.getElementById("d");
+  const DEl = document.getElementById("D");
+  const nEl = document.getElementById("n");
+  const dLabel = document.getElementById("dLabel");
+  const DLabel = document.getElementById("DLabel");
+  const nLabel = document.getElementById("nLabel");
+  const kLabel = document.getElementById("kLabel");
+  const xLabel = document.getElementById("xLabel");
+  const pBar = document.getElementById("pBar");
+  const statusEl = document.getElementById("status");
+
+  const resetBtn = document.getElementById("reset");
+  const nextGoalBtn = document.getElementById("nextGoal");
+  const goalNameEl = document.getElementById("goalName");
+  const toggleAssistBtn = document.getElementById("toggleAssist");
+
+  let assist = true;
+
+  function resize(){
+    const r = canvas.getBoundingClientRect();
+    const dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(r.width * dpr);
+    canvas.height = Math.floor(r.height * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resize);
+
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  // -------------------------
+  // Toy physics world
+  // -------------------------
+  const world = {
+    g: 520,          // gravity (px/s^2)
+    drag: 0.985,     // air drag multiplier per frame-ish
+    dt: 1/60,
+  };
+
+  const ball = {
+    x: 0, y: 0,
+    vx: 0, vy: 0,
+    r: 10,
+    active: false
+  };
+
+  // Spring launcher (bottom center)
+  const launcher = {
+    baseX: 0, baseY: 0,
+    axisX: 0, axisY: -1,      // launch axis direction
+    restLen: 120,
+    len: 120,
+    minLen: 60,
+    maxLen: 150,
+    knobR: 16,
+    dragging: false,
+  };
+
+  // Goals (planets)
+  const goals = [
+    {name:"月",   yFrac: 0.68, r: 24},
+    {name:"火星", yFrac: 0.52, r: 26},
+    {name:"木星", yFrac: 0.34, r: 30},
+    {name:"土星", yFrac: 0.22, r: 32},
+    {name:"天王星", yFrac: 0.16, r: 34},
+    {name:"海王星", yFrac: 0.12, r: 36},
+  ];
+  let goalIndex = 0;
+
+  function getK(){
+    // Compression spring k approx: k ~ G d^4 / (8 n D^3)
+    // Use a scaled toy constant for nice numbers.
+    const d = Number(dEl.value);
+    const D = Number(DEl.value);
+    const n = Number(nEl.value);
+    const G = 80; // toy shear modulus
+    const k = (G * Math.pow(d,4)) / (8 * n * Math.pow(D,3));
+    return k; // small number
+  }
+
+  function currentX(){
+    // compression amount from rest (positive when compressed)
+    return Math.round(clamp(launcher.restLen - launcher.len, 0, 999));
+  }
+
+  function initPositions(){
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    launcher.baseX = w*0.5;
+    launcher.baseY = h - 40;
+    launcher.len = launcher.restLen;
+    launcher.axisX = 0;
+    launcher.axisY = -1;
+
+    ball.x = launcher.baseX;
+    ball.y = launcher.baseY - launcher.restLen - ball.r - 2;
+    ball.vx = 0; ball.vy = 0;
+    ball.active = false;
+  }
+
+  function goalPos(){
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    const g = goals[goalIndex];
+    return { x: w*0.75, y: h*g.yFrac, r: g.r, name:g.name };
+  }
+
+  function setGoal(i){
+    goalIndex = (i+goals.length)%goals.length;
+    goalNameEl.textContent = goals[goalIndex].name;
+  }
+
+  nextGoalBtn.addEventListener("click", ()=>{
+    setGoal(goalIndex+1);
+  });
+
+  resetBtn.addEventListener("click", ()=>{
+    initPositions();
+    statusEl.textContent = "リセットしました";
+  });
+
+  toggleAssistBtn.addEventListener("click", ()=>{
+    assist = !assist;
+    toggleAssistBtn.textContent = `角度アシスト：${assist ? "ON" : "OFF"}`;
+  });
+
+  function pointerPos(e){
+    const r = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: clientX - r.left, y: clientY - r.top };
+  }
+
+  function knobPos(){
+    return {
+      x: launcher.baseX + launcher.axisX*launcher.len,
+      y: launcher.baseY + launcher.axisY*launcher.len
+    };
+  }
+
+  function hitKnob(p){
+    const k = knobPos();
+    const dx=p.x-k.x, dy=p.y-k.y;
+    return (dx*dx+dy*dy) <= (launcher.knobR+8)*(launcher.knobR+8);
+  }
+
+  function setFromPointer(p){
+    // Direction: from base to pointer (but limited)
+    let dx = p.x - launcher.baseX;
+    let dy = p.y - launcher.baseY;
+
+    // We want generally upward launches: constrain dy to be negative-ish
+    dy = Math.min(dy, -30);
+
+    let len = Math.hypot(dx,dy);
+    if(len < 1) len = 1;
+
+    let ax = dx/len;
+    let ay = dy/len;
+
+    // Gentle angle variation: constrain to +/- 25 degrees from straight up
+    // (assist ON makes it stronger)
+    const maxDeg = assist ? 18 : 25;
+    const max = maxDeg * Math.PI/180;
+
+    // angle from straight up: straight up vector is (0,-1)
+    let angle = Math.atan2(ax, -ay); // 0 means straight up
+    angle = clamp(angle, -max, max);
+
+    // rebuild axis from angle
+    launcher.axisX = Math.sin(angle);
+    launcher.axisY = -Math.cos(angle);
+
+    // Length along axis: pointer projection
+    // Project (dx,dy) onto axis, then clamp
+    const proj = dx*launcher.axisX + dy*launcher.axisY;
+    launcher.len = clamp(proj, launcher.minLen, launcher.restLen);
+  }
+
+  function launch(){
+    const x = currentX();
+    if(x <= 0) return;
+
+    const k = getK();
+    // Toy energy: E ~ 0.5*k*x^2, v ~ sqrt(2E/m)
+    const m = 1.0;
+    const E = 0.5 * k * (x*x);
+    let v = Math.sqrt((2*E)/m);
+
+    // Scale to pixel game feel
+    v *= 1100; // tuning
+
+    // Cap speed so it doesn't instantly exit
+    v = Math.min(v, 1600);
+
+    ball.active = true;
+    ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
+    ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+    ball.vx = launcher.axisX * v;
+    ball.vy = launcher.axisY * v;
+
+    statusEl.textContent = "発射！";
+  }
+
+  // Events
+  canvas.addEventListener("mousedown", (e)=>{
+    const p = pointerPos(e);
+    if(hitKnob(p)){
+      launcher.dragging = true;
+      if(!ball.active){
+        // keep ball parked on launcher tip while aiming
+        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
+        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+      }
+    }
+  });
+
+  window.addEventListener("mousemove", (e)=>{
+    if(!launcher.dragging) return;
+    setFromPointer(pointerPos(e));
+  });
+
+  window.addEventListener("mouseup", ()=>{
+    if(!launcher.dragging) return;
+    launcher.dragging = false;
+    // release => launch
+    launch();
+    // spring returns
+    launcher.len = launcher.restLen;
+    launcher.axisX = 0;
+    launcher.axisY = -1;
+  });
+
+  // Touch
+  canvas.addEventListener("touchstart", (e)=>{
+    const p = pointerPos(e);
+    if(hitKnob(p)){
+      launcher.dragging = true;
+      if(!ball.active){
+        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
+        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+      }
+    }
+  }, {passive:true});
+
+  window.addEventListener("touchmove", (e)=>{
+    if(!launcher.dragging) return;
+    setFromPointer(pointerPos(e));
+  }, {passive:true});
+
+  window.addEventListener("touchend", ()=>{
+    if(!launcher.dragging) return;
+    launcher.dragging = false;
+    launch();
+    launcher.len = launcher.restLen;
+    launcher.axisX = 0;
+    launcher.axisY = -1;
+  });
+
+  // UI label updates
+  function updateUI(){
+    dLabel.textContent = dEl.value;
+    DLabel.textContent = DEl.value;
+    nLabel.textContent = nEl.value;
+
+    const k = getK();
+    // show friendly number
+    const kShow = (k*1e5).toFixed(1);
+    kLabel.textContent = kShow;
+
+    const x = currentX();
+    xLabel.textContent = x;
+
+    // power bar from x + k
+    const power = clamp((k*1e5) * (x/90), 0, 120);
+    pBar.style.width = `${clamp(power,0,100)}%`;
+
+    if(!ball.active && !launcher.dragging) statusEl.textContent = "ノブをドラッグして押し込んでね";
+  }
+
+  // Physics step
+  function step(){
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+
+    if(ball.active){
+      const dt = world.dt;
+
+      ball.vy += world.g * dt;
+
+      ball.vx *= world.drag;
+      ball.vy *= world.drag;
+
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+
+      // bounds: if out -> stop & reset softly
+      if(ball.x < -200 || ball.x > w+200 || ball.y < -300 || ball.y > h+300){
+        ball.active = false;
+        statusEl.textContent = "画面外！リセットしてもう一回！";
+        initPositions();
+      }
+    } else {
+      // park ball at spring tip while aiming
+      if(launcher.dragging){
+        ball.x = launcher.baseX + launcher.axisX*(launcher.restLen+ball.r+2);
+        ball.y = launcher.baseY + launcher.axisY*(launcher.restLen+ball.r+2);
+      }
+    }
+
+    // win check
+    const gp = goalPos();
+    const dx = ball.x - gp.x, dy = ball.y - gp.y;
+    if(Math.hypot(dx,dy) <= gp.r + ball.r){
+      ball.active = false;
+      statusEl.textContent = `🎉 ${gp.name} 到達！ 次の天体へ！`;
+      setGoal(goalIndex+1);
+      initPositions();
+    }
+  }
+
+  // Drawing
+  function draw(){
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+
+    ctx.clearRect(0,0,w,h);
+
+    // stars
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "white";
+    for(let i=0;i<60;i++){
+      const x = (i*97)%w;
+      const y = (i*53)%h;
+      ctx.fillRect(x, y, 1, 1);
+    }
+    ctx.globalAlpha = 1;
+
+    // goal
+    const gp = goalPos();
+    ctx.fillStyle = "rgba(103,232,249,.16)";
+    ctx.strokeStyle = "rgba(103,232,249,.7)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(gp.x,gp.y,gp.r,0,Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    ctx.fillStyle = "rgba(231,238,252,.9)";
+    ctx.font = "800 16px system-ui";
+    ctx.fillText(gp.name, gp.x - gp.r, gp.y - gp.r - 10);
+
+    // ground line
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, h-20);
+    ctx.lineTo(w, h-20);
+    ctx.stroke();
+
+    // launcher base
+    ctx.fillStyle = "rgba(255,255,255,.07)";
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(launcher.baseX-70, launcher.baseY-18, 140, 36, 10);
+    ctx.fill(); ctx.stroke();
+
+    // spring
+    const top = {x: launcher.baseX, y: launcher.baseY};
+    const end = knobPos();
+    const total = Math.hypot(end.x-top.x, end.y-top.y);
+    const coils = 11;
+    const segs = coils*10;
+
+    const dirX = (end.x-top.x)/Math.max(1,total);
+    const dirY = (end.y-top.y)/Math.max(1,total);
+    const perpX = -dirY;
+    const perpY = dirX;
+
+    // amplitude depends slightly on D (visual)
+    const amp = 10 + (Number(DEl.value)/40)*14;
+
+    ctx.strokeStyle = "rgba(167,139,250,.85)";
+    ctx.lineWidth = 6;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    for(let i=0;i<=segs;i++){
+      const t = i/segs;
+      const baseX = lerp(top.x, end.x, t);
+      const baseY = lerp(top.y, end.y, t);
+      const phase = t * coils * Math.PI*2;
+      const wobble = Math.sin(phase) * amp;
+      const x = baseX + perpX*wobble;
+      const y = baseY + perpY*wobble;
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+
+    // knob
+    ctx.fillStyle = "rgba(103,232,249,.9)";
+    ctx.strokeStyle = "rgba(255,255,255,.55)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(end.x,end.y,launcher.knobR,0,Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    // ball
+    ctx.fillStyle = "rgba(231,238,252,.92)";
+    ctx.beginPath();
+    ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+    ctx.fill();
+
+    // helper arrow (aim)
+    if(launcher.dragging){
+      ctx.strokeStyle = "rgba(103,232,249,.65)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(launcher.baseX, launcher.baseY);
+      ctx.lineTo(launcher.baseX + launcher.axisX*(launcher.restLen+30),
+                 launcher.baseY + launcher.axisY*(launcher.restLen+30));
+      ctx.stroke();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  function loop(){
+    updateUI();
+    step();
+    requestAnimationFrame(loop);
+  }
+
+  // init
+  resize();
+  setGoal(0);
+  initPositions();
+  statusEl.textContent = "ノブをドラッグして押し込んでね";
+  requestAnimationFrame(draw);
+  requestAnimationFrame(loop);
+
+  // UI hooks
+  [dEl,DEl,nEl].forEach(el=>el.addEventListener("input", ()=>{}));
+})();
+</script>
+</body>
+</html>
