@@ -290,18 +290,25 @@
   // -------------------------
   // Spawn functions（4種類）
   // -------------------------
-  function spawnShootingStar(){
-    const w = canvas.getBoundingClientRect().width;
-    bgObjects.push({
-      type: "star",
-      x: Math.random()*w,
-      y: -50,
-      vx: (-250 + Math.random()*500) * 0.2,
-      vy: (320 + Math.random()*240) * 0.2,
-      life: 2.2 + Math.random()*0.8,
-      alpha: 1
-    });
-  }
+function spawnShootingStar(){
+  const w = canvas.getBoundingClientRect().width;
+
+  const angle = (225 + (-15 + Math.random()*30)) * Math.PI/180; // 右上→左下 ±15°
+  const speed = (380 + Math.random()*260) * 0.2;               // 速度は半分
+
+  bgObjects.push({
+    type: "star",
+    x: Math.random()*w,
+    y: -50,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    life: 2.5,
+    maxLife: 2.5,
+    size: 44*3,
+    alpha: 1
+  });
+}
+
 
   function spawnRocket(){
     const w = canvas.getBoundingClientRect().width;
@@ -486,9 +493,12 @@
       if(o.type !== "ufo") o.vy += 30 * world.dt;
 
       // UFO：背景に溶けて消える（残り時間でフェード）
-      if(o.fade){
-        o.alpha = Math.max(0, Math.min(1, o.life / 2));
-      }
+// 流れ星：時間とともに薄く・小さく
+if(o.type === "star"){
+  const t = Math.max(0, o.life / o.maxLife); // 1 → 0
+  o.alpha = t;
+  o.size = o.size * (0.985); // 徐々に縮む
+}
 
       // 画面外でも消す（保険）
       if(o.life <= 0 || o.x < -200 || o.x > w+200 || o.y < -200 || o.y > h+200){
@@ -527,7 +537,7 @@
     bgObjects.forEach(o => {
       const img = bgImages[o.type];
       if(!img) return;
-      const size = (o.type === "ufo") ? 62*10 : 44*10;
+　　　const size = o.size ?? ((o.type === "ufo") ? 62*10 : 44*10;
       ctx.save();
       ctx.globalAlpha = (o.alpha ?? 1);
       ctx.drawImage(img, o.x, o.y, size, size);
