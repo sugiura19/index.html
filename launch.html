@@ -55,10 +55,9 @@
     .num{ font-size:18px; font-weight:900; margin-top:2px;}
     .hint{ margin-top:10px; padding:10px; border-radius:14px; border:1px dashed rgba(255,255,255,.18); color:var(--muted); }
 
-    /* スマホ対応：縦並びにする */
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
-      canvas { height: 72vh; min-height: 420px; } /* ちょい広め */
+      canvas { height: 72vh; min-height: 420px; }
       .card:last-child { order: 2; }
       .card:first-child { order: 1; }
     }
@@ -79,7 +78,10 @@
     <div class="card">
       <div class="row">
         <div class="pill">🎯 目標：<b id="goalName">—</b></div>
-        <button class="btn" id="nextGoal">次の天体</button>
+        <button class="btn" id="nextGoal">次の天体（ランダム）</button>
+      </div>
+      <div class="pill" style="margin-top:10px;">
+        📏 地球↔天体：<b id="distLabel">—</b>
       </div>
 
       <label>線径 d（太いほど硬い）</label>
@@ -117,7 +119,8 @@
 
       <div class="small" style="margin-top:12px;">
         ・式は教育用の「それっぽさ」です（精密設計ではない）。<br>
-        ・天体はランダム位置に出ます（天体ごとにサイズは固定）。
+        ・天体はランダムで出ます（当たり判定は天体サイズ相当）。<br>
+        ・左側の「Nauru」に当てると流れ星が飛び出します。
       </div>
     </div>
   </div>
@@ -143,6 +146,7 @@
   const nextGoalBtn = document.getElementById("nextGoal");
   const goalNameEl = document.getElementById("goalName");
   const toggleAssistBtn = document.getElementById("toggleAssist");
+  const distLabelEl = document.getElementById("distLabel");
 
   let assist = true;
   let dpr = 1;
@@ -152,14 +156,11 @@
     dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
     canvas.width = Math.floor(r.width * dpr);
     canvas.height = Math.floor(r.height * dpr);
-    // 以後の描画は「CSSピクセル座標」で描ける
     ctx.setTransform(dpr,0,0,dpr,0,0);
 
-    // 画面サイズが変わったら、発射台は「必ず下中央」に再配置
     initPositions();
-
-    // 目標が画面外に出ないよう、今の天体ももう一度安全位置へ
-    placeGoalRandom();
+    placeNauru();         // ★追加：nauru配置
+    placeGoalRandom();    // ★ランダム天体
   }
   window.addEventListener("resize", resize);
 
@@ -174,13 +175,17 @@
   let mascotReady = false;
   mascotImg.onload = () => { mascotReady = true; };
 
-  // ★ボール用ロゴ
   const ballImg = new Image();
   ballImg.src = "logo.png";
   let ballImgReady = false;
   ballImg.onload = () => { ballImgReady = true; };
 
-  // ★天体6枚（ファイル名はここ）
+  // ★Nauru（画像ファイル名：nauru.png を想定）
+  const nauruImg = new Image();
+  nauruImg.src = "nauru.png";
+  let nauruReady = false;
+  nauruImg.onload = () => { nauruReady = true; };
+
   const planetImgs = {
     moon:   new Image(),
     mars:   new Image(),
@@ -201,7 +206,7 @@
   // -------------------------
   const world = { g: 520, drag: 0.985, dt: 1/60 };
 
-  const ball = { x:0, y:0, vx:0, vy:0, r:18, active:false }; // ロゴ球ちょい大きめ
+  const ball = { x:0, y:0, vx:0, vy:0, r:18, active:false };
 
   const launcher = {
     baseX: 0, baseY: 0,
@@ -228,21 +233,33 @@
   const bgObjects = [];
 
   // -------------------------
-  // Goals (planets)
-  // ★天体ごとにサイズ（当たり判定半径）を変える
+  // Goals (planets) + distance
+  // ※距離は「平均距離の概算（km）」として表示（勉強用）
   // -------------------------
   const goals = [
-    { key:"moon",    name:"月",     r: 26 },
-    { key:"mars",    name:"火星",   r: 28 },
-    { key:"jupiter", name:"木星",   r: 36 },
-    { key:"saturn",  name:"土星",   r: 40 },
-    { key:"uranus",  name:"天王星", r: 34 },
-    { key:"neptune", name:"海王星", r: 34 },
+    { key:"moon",    name:"月",     r: 26, distKm: 384400 },
+    { key:"mars",    name:"火星",   r: 28, distKm: 225000000 },
+    { key:"jupiter", name:"木星",   r: 36, distKm: 628700000 },
+    { key:"saturn",  name:"土星",   r: 40, distKm: 1275000000 },
+    { key:"uranus",  name:"天王星", r: 34, distKm: 2723000000 },
+    { key:"neptune", name:"海王星", r: 34, distKm: 4351000000 },
   ];
-  let goalIndex = 0;
 
-  // 現在の「目標天体」の実体（ランダム位置）
-  const goalState = { x: 0, y: 0, r: 30, name: "—", key: "moon" };
+  // 現在の「目標天体」（ランダム）
+  const goalState = { x: 0, y: 0, r: 30, name: "—", key: "moon", distKm: 0 };
+
+  // ★Nauru（左側ターゲット）
+  const nauru = { x: 0, y: 0, r: 28, name: "Nauru" };
+  let nauruCooldown = 0; // 連続ヒットで星が出過ぎないように
+
+  function fmtDistanceKm(km){
+    if(!km || km <= 0) return "—";
+    if(km < 1000000) return `${km.toLocaleString("ja-JP")} km`;
+    const million = km / 1_000_000;
+    if(million < 1000) return `${million.toFixed(million < 10 ? 2 : 1)} 百万km（概算）`;
+    const billion = km / 1_000_000_000;
+    return `${billion.toFixed(billion < 10 ? 2 : 1)} 十億km（概算）`;
+  }
 
   function getK(){
     const d = Number(dEl.value);
@@ -260,7 +277,6 @@
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
 
-    // ★発射台は常に「画面下・中央」
     launcher.baseX = w * 0.5;
     launcher.baseY = h - 40;
 
@@ -274,37 +290,57 @@
     ball.active = false;
   }
 
-  // ★目標を「ランダム位置」に置く（ただし近すぎ/端すぎ禁止）
+  // ★Nauruを「バネの左側」に固定配置（距離あり）
+  function placeNauru(){
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+
+    const margin = 26;
+    const safeBottom = 120;
+
+    // 発射台の左側。画面が狭いときでも見切れないように clamp。
+    const desiredX = launcher.baseX - Math.min(320, w * 0.32);
+    const desiredY = h - safeBottom;
+
+    nauru.x = clamp(desiredX, margin + nauru.r, w - (margin + nauru.r));
+    nauru.y = clamp(desiredY, margin + nauru.r, h - (margin + nauru.r));
+  }
+
+  // ★目標を「完全に画面内」にランダム配置（見切れ禁止）
   function placeGoalRandom(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
 
-    const margin = 26;             // 画面端からの余白
-    const safeBottom = 130;        // 地面/発射台の近くを避ける
+    const margin = 26;
+    const safeBottom = 130;
+
     const g = goals[goalIndex];
     const r = g.r;
 
-    // 置ける範囲（上は少し余裕、下は発射台付近を避ける）
     const minX = margin + r;
     const maxX = w - (margin + r);
     const minY = margin + r;
     const maxY = Math.max(minY + 10, (h - safeBottom) - r);
 
-    // 発射台から近すぎないようにする
     const lx = launcher.baseX;
-    const ly = launcher.baseY - launcher.restLen; // だいたいバネ上端付近
-    const minDist = 220; // 近すぎると即クリアになりがちなので
+    const ly = launcher.baseY - launcher.restLen;
+    const minDistFromLauncher = 220;
+
+    // nauruからも少し離す（被り防止）
+    const minDistFromNauru = 140;
 
     let x= w*0.75, y= h*0.45;
-    for(let t=0; t<40; t++){
+    for(let t=0; t<60; t++){
       const rx = minX + Math.random() * (maxX - minX);
       const ry = minY + Math.random() * (maxY - minY);
-      const d  = Math.hypot(rx - lx, ry - ly);
-      if(d >= minDist){
+
+      const dl = Math.hypot(rx - lx, ry - ly);
+      const dn = Math.hypot(rx - nauru.x, ry - nauru.y);
+
+      if(dl >= minDistFromLauncher && dn >= (minDistFromNauru + r + nauru.r*0.2)){
         x = rx; y = ry;
         break;
       }
-      // 40回やって無理なら最後の値で妥協（画面が極端に小さい場合）
       x = rx; y = ry;
     }
 
@@ -313,8 +349,19 @@
     goalState.r = r;
     goalState.name = g.name;
     goalState.key = g.key;
+    goalState.distKm = g.distKm;
 
     goalNameEl.textContent = g.name;
+    distLabelEl.textContent = fmtDistanceKm(g.distKm);
+  }
+
+  let goalIndex = 0;
+
+  function pickRandomGoalIndex(){
+    if(goals.length <= 1) return 0;
+    let idx = Math.floor(Math.random() * goals.length);
+    if(idx === goalIndex) idx = (idx + 1) % goals.length;
+    return idx;
   }
 
   function setGoal(i){
@@ -322,10 +369,19 @@
     placeGoalRandom();
   }
 
-  nextGoalBtn.addEventListener("click", ()=> setGoal(goalIndex + 1));
+  function setRandomGoal(){
+    goalIndex = pickRandomGoalIndex();
+    placeGoalRandom();
+  }
+
+  nextGoalBtn.addEventListener("click", ()=> {
+    setRandomGoal();
+    statusEl.textContent = "新しい天体が出現！";
+  });
 
   resetBtn.addEventListener("click", ()=>{
     initPositions();
+    placeNauru();
     placeGoalRandom();
     statusEl.textContent = "リセットしました";
   });
@@ -359,7 +415,7 @@
     let dx = p.x - launcher.baseX;
     let dy = p.y - launcher.baseY;
 
-    dy = Math.min(dy, -30); // 基本は上方向
+    dy = Math.min(dy, -30);
 
     let len = Math.hypot(dx,dy);
     if(len < 1) len = 1;
@@ -381,17 +437,22 @@
   }
 
   // -------------------------
-  // 飛来物（4種） ※前のまま（おまけ）
+  // 背景おまけ（前のまま）
   // -------------------------
-  function spawnShootingStar(){
+  function spawnShootingStar(opts={}){
     const w = canvas.getBoundingClientRect().width;
     const angle = (225 + (-15 + Math.random()*30)) * Math.PI/180;
     const speed = (380 + Math.random()*260) * 0.5;
     const life = 6.0;
+
+    // ★出現位置を指定できる（nauruヒット用）
+    const sx = (typeof opts.x === "number") ? opts.x : w * (0.65 + Math.random()*0.35);
+    const sy = (typeof opts.y === "number") ? opts.y : -20;
+
     bgObjects.push({
       type:"star",
-      x: w * (0.65 + Math.random()*0.35),
-      y: -20,
+      x: sx,
+      y: sy,
       vx: Math.cos(angle)*speed,
       vy: Math.sin(angle)*speed,
       life, maxLife: life,
@@ -448,7 +509,7 @@
   }, 5000);
 
   // -------------------------
-  // Launch
+  // Launch（★強さ 半分）
   // -------------------------
   function launch(){
     const x = currentX();
@@ -459,6 +520,10 @@
     let v = Math.sqrt((2*E) / 1.0);
 
     v *= 1100;
+
+    // ★球の飛んでく強さ：半分
+    v *= 0.5;
+
     v = Math.min(v, 1600);
 
     ball.active = true;
@@ -505,7 +570,7 @@
     const p = pointerPos(e);
     if(hitKnob(p)){
       launcher.dragging = true;
-      e.preventDefault(); // ノブ掴んだ瞬間だけスクロール開始を止める
+      e.preventDefault();
 
       if(!ball.active){
         ball.x = launcher.baseX + launcher.axisX*(launcher.restLen + ball.r + 2);
@@ -515,8 +580,8 @@
   }, {passive:false});
 
   canvas.addEventListener("touchmove", (e)=>{
-    if(!launcher.dragging) return; // ノブ以外は普通にスクロールできる
-    e.preventDefault();            // ドラッグ中だけ固定
+    if(!launcher.dragging) return;
+    e.preventDefault();
     setFromPointer(pointerPos(e));
   }, {passive:false});
 
@@ -555,6 +620,8 @@
   function step(){
     const w = canvas.getBoundingClientRect().width;
     const h = canvas.getBoundingClientRect().height;
+
+    if(nauruCooldown > 0) nauruCooldown -= world.dt;
 
     // ball physics
     if(ball.active){
@@ -599,13 +666,28 @@
       }
     }
 
-    // win check（ランダム位置の goalState を使う）
+    // ★Nauru hit → 流れ星が飛び出す
+    if(ball.active){
+      const dn = Math.hypot(ball.x - nauru.x, ball.y - nauru.y);
+      if(dn <= nauru.r + ball.r){
+        if(nauruCooldown <= 0){
+          nauruCooldown = 0.6;
+          // Nauruの位置から飛び出す感じ
+          for(let s=0; s<2; s++){
+            spawnShootingStar({ x: nauru.x + 10 + Math.random()*30, y: nauru.y - 10 - Math.random()*20 });
+          }
+          statusEl.textContent = "✨ Nauruヒット！流れ星！";
+        }
+      }
+    }
+
+    // ★win check（当たり判定は天体と同じくらい）
     const dx = ball.x - goalState.x;
     const dy = ball.y - goalState.y;
-    if(Math.hypot(dx,dy) <= goalState.r + ball.r){
+    if(ball.active && Math.hypot(dx,dy) <= goalState.r + ball.r){
       ball.active = false;
       statusEl.textContent = `🎉 ${goalState.name} 到達！ 次の天体へ！`;
-      setGoal(goalIndex + 1);
+      setRandomGoal();
       initPositions();
     }
   }
@@ -619,7 +701,7 @@
 
     ctx.clearRect(0,0,w,h);
 
-    // stars（先に描く）
+    // stars
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = "white";
     for(let i=0;i<70;i++){
@@ -629,7 +711,7 @@
     }
     ctx.globalAlpha = 1;
 
-    // bg objects（当たり判定なし）
+    // bg objects
     bgObjects.forEach(o => {
       const img = bgImages[o.type];
       if(!img) return;
@@ -640,11 +722,10 @@
       ctx.restore();
     });
 
-    // goal（天体画像＋ふわっと光）
+    // goal（天体）
     const gpImg = planetImgs[goalState.key];
     const gr = goalState.r;
 
-    // glow
     ctx.save();
     ctx.globalAlpha = 0.25;
     ctx.fillStyle = "rgba(103,232,249,1)";
@@ -653,7 +734,6 @@
     ctx.fill();
     ctx.restore();
 
-    // planet image (円でクリップして描画)
     if(gpImg && gpImg.complete && gpImg.naturalWidth > 0){
       ctx.save();
       ctx.beginPath();
@@ -662,7 +742,6 @@
       ctx.drawImage(gpImg, goalState.x - gr, goalState.y - gr, gr*2, gr*2);
       ctx.restore();
     } else {
-      // 画像がまだなら簡易円
       ctx.fillStyle = "rgba(103,232,249,.22)";
       ctx.strokeStyle = "rgba(103,232,249,.8)";
       ctx.lineWidth = 2;
@@ -730,7 +809,35 @@
     ctx.arc(end.x,end.y,launcher.knobR,0,Math.PI*2);
     ctx.fill(); ctx.stroke();
 
-    // ball（logo.png を丸く描画）
+    // ★Nauru（左側）
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = "rgba(103,232,249,1)";
+    ctx.beginPath();
+    ctx.arc(nauru.x, nauru.y, nauru.r*1.35, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    if(nauruReady && nauruImg.complete && nauruImg.naturalWidth > 0){
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(nauru.x, nauru.y, nauru.r, 0, Math.PI*2);
+      ctx.clip();
+      ctx.drawImage(nauruImg, nauru.x - nauru.r, nauru.y - nauru.r, nauru.r*2, nauru.r*2);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "rgba(103,232,249,.18)";
+      ctx.strokeStyle = "rgba(103,232,249,.75)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(nauru.x, nauru.y, nauru.r, 0, Math.PI*2);
+      ctx.fill(); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(231,238,252,.90)";
+    ctx.font = "800 14px system-ui";
+    ctx.fillText("Nauru", nauru.x - nauru.r, nauru.y - nauru.r - 10);
+
+    // ball（logo.png）
     if (ballImgReady) {
       ctx.save();
       ctx.beginPath();
@@ -779,9 +886,12 @@
   }
 
   // init
-  resize();      // ←resize内で initPositions + placeGoalRandom までやる
-  setGoal(0);    // 念のため名前反映
+  resize();
+
+  // ★最初の天体はランダムに
+  setRandomGoal();
   statusEl.textContent = "ノブをドラッグして押し込んでね";
+
   requestAnimationFrame(loop);
 })();
 </script>
